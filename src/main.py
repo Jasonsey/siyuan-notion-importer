@@ -10,9 +10,14 @@
 """main"""
 import re
 import json
+from typing import Optional
+
+import asyncio
 from tqdm import tqdm
 
 from api import Api
+
+api = Api()
 
 
 def update_node_paragraph(data: str):
@@ -21,7 +26,9 @@ def update_node_paragraph(data: str):
     if '\\$' in data:
         data = re.sub(r"\\(\\*)", r"\1", data)
     # img optimize show
-    data = re.sub(r"!?\[(.*?)]\((.*?)\.(bmp|jpg|png|tif|gif|pcx|tga|exif|fpx|svg|psd|cdr|pcd|dxf|ufo|eps|ai|raw|WMF|webp|jpeg)\)", r"![\1](\2.\3)", data)
+    data = re.sub(
+        r"!?\[(.*?)]\((.*?)\.(bmp|jpg|png|tif|gif|pcx|tga|exif|fpx|svg|psd|cdr|pcd|dxf|ufo|eps|ai|raw|WMF|webp|jpeg)\)",
+        r"![\1](\2.\3)", data)
     return data
 
 
@@ -36,11 +43,11 @@ def update_node_blockquote(data: str):
     if "[!important]" in data or "[!info]" in data:
         res = []
 
-        important_data = re.findall(r"> \[!important](.*?)(?:\[!.*?]|{: id=.*? updated=.*?})", data, flags=re.DOTALL)
-        important_data = [re.sub(r"\n?(.*?)(?:\n> )?$", r"\1", item) for item in important_data]
+        important_data = re.findall(r"> \[!important](.*?)(?:\[!.*?]|{: .*?=.*? .*?=.*?})", data, flags=re.DOTALL)
+        important_data = [item.strip() for item in important_data]
         res.extend(important_data)
 
-        info_data = re.findall(r"> \[!info](.*?)(?:\[!.*?]|{: id=.*? updated=.*?})", data, flags=re.DOTALL)
+        info_data = re.findall(r"> \[!info](.*?)(?:\[!.*?]|{: .*?=.*? .*?=.*?})", data, flags=re.DOTALL)
         info_data = [re.sub(r"\n?(.*?)(?:\n> )?$", r"\1", item) for item in info_data]
         for idx, item in enumerate(info_data):
             # url
@@ -57,53 +64,58 @@ def update_node_blockquote(data: str):
     return data
 
 
-def update_data(data: dict):
+async def update_data(data: dict):
     """更新NodeParagraph"""
-    api = Api()
-
     if data['Type'] == "NodeParagraph":
         # update
         idx = data['ID']
-        markdown_data = api.get_block_kramdown(idx)
+        markdown_data = await api.get_block_kramdown(idx)
         markdown_data = update_node_paragraph(markdown_data)
-        api.update_block(markdown_data, idx=idx)
+        await api.update_block(markdown_data, idx=idx)
     elif data['Type'] == "NodeMathBlock":
         # update math block
         idx = data['ID']
-        markdown_data = api.get_block_kramdown(idx)
+        markdown_data = await api.get_block_kramdown(idx)
         markdown_data = update_node_math_block(markdown_data)
-        api.update_block(markdown_data, idx=idx)
+        await api.update_block(markdown_data, idx=idx)
     elif data['Type'] == "NodeBlockquote":
         # update quote
         idx = data['ID']
-        markdown_data = api.get_block_kramdown(idx)
+        markdown_data = await api.get_block_kramdown(idx)
         markdown_data = update_node_blockquote(markdown_data)
-        api.update_block(markdown_data, idx=idx)
+        await api.update_block(markdown_data, idx=idx)
     elif "Children" not in data:
         pass
     else:
         for child in data['Children']:
-            update_data(child)
+            await update_data(child)
 
 
-def main():
-    api = Api()
+async def update_file_with_bar(data: dict, bar: Optional[tqdm] = None):
+    await update_data(data)
+    if bar is not None:
+        bar.update()
 
-    path = api.get_filepath_by_id("20250210140717-bh2fko2")
+
+async def main():
+    path = await api.get_filepath_by_id("20250211145209-ncpw7tz")
     data = json.load(open(path))
-    update_data(data)
+    await update_data(data)
 
     data = json.load(open(path))
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
-def main2():
-    api = Api()
-    files = api.get_all_sy_files()
-    for file in tqdm(files):
+async def main2():
+    files = await api.get_all_sy_files()
+    bar = tqdm(total=len(files), desc="updating file")
+    tasks = []
+    for file in files:
         data = json.load(open(file))
-        update_data(data)
+        task = asyncio.create_task(update_file_with_bar(data, bar))
+        tasks.append(task)
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
-    main2()
+    asyncio.run(main2())

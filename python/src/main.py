@@ -17,7 +17,8 @@ from tqdm import tqdm
 
 from api import Api
 
-api = Api()
+# change this if you need
+api = Api(notebook_name="notion", data_home="/Users/max/SiYuan/data")
 
 
 def update_node_paragraph(data: str):

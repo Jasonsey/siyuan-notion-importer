@@ -24,7 +24,7 @@ class Api:
     base_url: str = "http://127.0.0.1:6806"
     headers: Dict[str, str] = field(default_factory=lambda: {"Content-Type": "application/json"})
     _notebook_home: Optional[str] = None
-    _sem: Semaphore = Semaphore(1)
+    _sem: Semaphore = Semaphore(500)
 
     async def notebook_home(self):
         if self._notebook_home is None:

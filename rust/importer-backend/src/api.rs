@@ -1,10 +1,10 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
+use glob::glob;
 use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use glob::glob;
 use tokio::sync::Semaphore;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -18,23 +18,22 @@ struct Notebook {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ResponseData<T> {
-    code: u8,
+    code: i32,
     msg: String,
     data: T,
 }
 
 #[derive(Debug)]
-struct Api {
+pub(crate) struct Api {
     notebook_name: String,
     data_home: String,
     base_url: String,
-    headers: HeaderMap,
     _notebook_home: Option<PathBuf>,
     _sem: Semaphore,
 }
 
 impl Api {
-    async fn default() -> Self {
+    pub(crate) async fn default() -> Self {
         Self::new(
             "test-notion",
             "/Users/max/SiYuan/data",
@@ -52,15 +51,11 @@ impl Api {
     /// _notebook_home: Optional[str] = None
     /// _sem: Semaphore = Semaphore(500)
     /// ```
-    async fn new(notebook_name: &str, data_home: &str, base_url: &str) -> Self {
-        let mut headers = HeaderMap::new();
-        headers.insert("Content-Type", "application/json".parse().unwrap());
-
+    pub(crate) async fn new(notebook_name: &str, data_home: &str, base_url: &str) -> Self {
         Api {
             notebook_name: notebook_name.to_string(),
             data_home: data_home.to_string(),
             base_url: base_url.to_string(),
-            headers,
             _notebook_home: None,
             _sem: Semaphore::new(500),
         }
@@ -82,7 +77,7 @@ impl Api {
         Ok(self._notebook_home.clone().unwrap())
     }
 
-    async fn get_all_sy_files(&mut self) -> Result<Vec<PathBuf>> {
+    pub(crate) async fn get_all_sy_files(&mut self) -> Result<Vec<PathBuf>> {
         let path = self.notebook_home().await?;
         let pattern = path.join("**/*.sy").to_string_lossy().to_string();
         let mut sy_files = Vec::new();
@@ -92,13 +87,12 @@ impl Api {
         Ok(sy_files)
     }
 
-    async fn list_notebooks(&self) -> Result<Vec<Notebook>> {
+    pub(crate) async fn list_notebooks(&self) -> Result<Vec<Notebook>> {
         let _permit = self._sem.acquire().await?;
         let client = reqwest::Client::new();
         let url = format!("{}/api/notebook/lsNotebooks", self.base_url);
         let response = client
             .post(&url)
-            .headers(self.headers.clone())
             .send()
             .await?;
         let res: ResponseData<HashMap<String, Vec<Notebook>>> = response.json().await?;
@@ -109,15 +103,13 @@ impl Api {
         Ok(notebooks)
     }
 
-    async fn get_filepath_by_id(&self, idx: &str) -> Result<String> {
+    pub(crate) async fn get_filepath_by_id(&self, idx: &str) -> Result<String> {
         let _permit = self._sem.acquire().await?;
         let client = reqwest::Client::new();
         let url = format!("{}/api/filetree/getPathByID", self.base_url);
         let payload = json!({"id": idx});
         let response = client
             .post(&url)
-            .json(&payload)
-            .headers(self.headers.clone())
             .json(&payload)
             .send()
             .await?;
@@ -129,7 +121,7 @@ impl Api {
         }
     }
 
-    async fn update_block(&self, data: &str, idx: &str) -> Result<()> {
+    pub(crate) async fn update_block(&self, data: &str, idx: &str) -> Result<()> {
         let _permit = self._sem.acquire().await?;
         let client = reqwest::Client::new();
         let url = format!("{}/api/block/updateBlock", self.base_url);
@@ -137,38 +129,44 @@ impl Api {
         let response = client
             .post(&url)
             .json(&payload)
-            .headers(self.headers.clone())
             .send()
             .await?;
-        let res: ResponseData<()> = response.json().await?;
+        let res: ResponseData<Value> = response.json().await?;
         if res.code != 0 {
-            Err(anyhow!("Error updating block"))
+            Err(anyhow!("Error updating block: {}, msg: {}", idx, res.msg))
         } else {
             Ok(())
         }
     }
 
-    async fn get_block_kramdown(&self, idx: &str) -> Result<String> {
+    pub(crate) async fn get_block_kramdown(&self, idx: &str) -> Result<String> {
         let _permit = self._sem.acquire().await?;
         let client = reqwest::Client::new();
-        let url = format!("{}/api/block/getKramdown", self.base_url);
+        let url = format!("{}/api/block/getBlockKramdown", self.base_url);
         let payload = json!({"id": idx});
         let response = client
             .post(&url)
             .json(&payload)
-            .headers(self.headers.clone())
             .send()
             .await?;
-        let res: ResponseData<HashMap<String, String>> = response.json().await?;
+        let res: ResponseData<Value> = response
+            .json()
+            .await
+            .map_err(|e| anyhow!("parse response error: {}", e))?;
         if res.code != 0 {
             Err(anyhow!("Error getting block Kramdown"))
         } else {
-            let kramdown_data = res.data.get("kramdown").unwrap().clone();
+            // TODO: debug
+            let raw_data = res.data.to_string();
+            let kramdown_data = res.data["kramdown"].as_str().unwrap_or("").to_string();
+            if kramdown_data == "" {
+                println!("{}", raw_data)
+            }
             Ok(kramdown_data)
         }
     }
 
-    async fn insert_block(
+    pub(crate) async fn insert_block(
         &self,
         data: &str,
         next_id: Option<&str>,
@@ -185,19 +183,18 @@ impl Api {
         let response = client
             .post(&url)
             .json(&payload)
-            .headers(self.headers.clone())
             .send()
             .await?;
         let res: ResponseData<Value> = response.json().await?;
         if res.code != 0 {
-            Err(anyhow!("Error updating block"))
+            Err(anyhow!("Error inserting block: {}", res.msg))
         } else {
             let new_idx = res.data["doOperations"]["id"].to_string();
             Ok(new_idx)
         }
     }
 
-    async fn delete_block(&self, idx: &str) -> Result<()> {
+    pub(crate) async fn delete_block(&self, idx: &str) -> Result<()> {
         let _permit = self._sem.acquire().await?;
         let client = reqwest::Client::new();
         let url = format!("{}/api/deleteBlock", self.base_url);
@@ -205,7 +202,6 @@ impl Api {
         let response = client
             .post(&url)
             .json(&payload)
-            .headers(self.headers.clone())
             .send()
             .await?;
         let res: ResponseData<()> = response.json().await?;
@@ -226,6 +222,14 @@ mod tests {
         let api = Api::default().await;
         let res = api.list_notebooks().await?;
         println!("{:#?}", res);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_block_kramdown() -> Result<()> {
+        let api = Api::default().await;
+        let res = api.get_block_kramdown("20250203215609-fl3g10b").await?;
+        println!("{}", res);
         Ok(())
     }
 }

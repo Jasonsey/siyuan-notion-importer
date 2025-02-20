@@ -1,0 +1,23 @@
+namespace importer_ffi {};
+
+[Traits=(Debug)]
+interface MyError {
+  string message();
+};
+
+interface NotebookFfi {
+    [Throws=MyError]
+    constructor(string data_home, string base_url);
+
+    [Throws=MyError]
+    sequence<string> get_notebook_names();
+
+    [Throws=MyError]
+    void set_notebook_name(string name);
+
+    [Throws=MyError]
+    sequence<string> get_all_files();
+
+    [Throws=MyError]
+    void process_file(string path);
+};

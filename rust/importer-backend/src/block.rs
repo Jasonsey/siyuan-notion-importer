@@ -18,7 +18,7 @@ pub(crate) fn update_node_paragraph(data: &str) -> String {
         data
     };
 
-    // 优化图片显示的正则表达式替换
+    // 优化图片显示正则表达式替换
     let re = Regex::new(r"(?<!!)(\[.*?]\(.*?\.(?:bmp|jpg|png|tif|gif|pcx|tga|exif|fpx|svg|psd|cdr|pcd|dxf|ufo|eps|ai|raw|WMF|webp|jpeg)\))").unwrap();
     let data = re.replace_all(&data, r"!$1").to_string();
 

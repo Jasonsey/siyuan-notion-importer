@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use glob::glob;
-use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -8,7 +7,7 @@ use std::path::{Path, PathBuf};
 use tokio::sync::Semaphore;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct Notebook {
+pub struct Notebook {
     id: String,
     name: String,
     icon: String,
@@ -25,13 +24,14 @@ struct ResponseData<T> {
 
 #[derive(Debug)]
 pub(crate) struct Api {
-    notebook_name: String,
+    pub(crate) notebook_name: Option<String>,
     data_home: String,
     base_url: String,
     _notebook_home: Option<PathBuf>,
     _sem: Semaphore,
 }
 
+#[allow(dead_code)]
 impl Api {
     pub(crate) async fn default() -> Self {
         Self::new(
@@ -53,7 +53,7 @@ impl Api {
     /// ```
     pub(crate) async fn new(notebook_name: &str, data_home: &str, base_url: &str) -> Self {
         Api {
-            notebook_name: notebook_name.to_string(),
+            notebook_name: Some(notebook_name.to_string()),
             data_home: data_home.to_string(),
             base_url: base_url.to_string(),
             _notebook_home: None,
@@ -61,11 +61,30 @@ impl Api {
         }
     }
 
+    pub(crate) async fn new2(data_home: &str, base_url: &str) -> Self {
+        Api {
+            notebook_name: None,
+            data_home: data_home.to_string(),
+            base_url: base_url.to_string(),
+            _notebook_home: None,
+            _sem: Semaphore::new(500),
+        }
+    }
+
+    pub(crate) async fn get_notebook_names(&self) -> Result<Vec<String>> {
+        let notebooks = self.list_notebooks().await?;
+        let names = notebooks
+            .iter()
+            .map(|item| item.name.clone())
+            .collect::<Vec<_>>();
+        Ok(names)
+    }
+
     async fn notebook_home(&mut self) -> Result<PathBuf> {
         if self._notebook_home.is_none() {
             let notebooks = self.list_notebooks().await?;
             for notebook in notebooks {
-                if notebook.name == self.notebook_name {
+                if Some(notebook.name) == self.notebook_name {
                     self._notebook_home = Some(Path::new(&self.data_home).join(notebook.id));
                     break;
                 }
@@ -87,14 +106,11 @@ impl Api {
         Ok(sy_files)
     }
 
-    pub(crate) async fn list_notebooks(&self) -> Result<Vec<Notebook>> {
+    pub async fn list_notebooks(&self) -> Result<Vec<Notebook>> {
         let _permit = self._sem.acquire().await?;
         let client = reqwest::Client::new();
         let url = format!("{}/api/notebook/lsNotebooks", self.base_url);
-        let response = client
-            .post(&url)
-            .send()
-            .await?;
+        let response = client.post(&url).send().await?;
         let res: ResponseData<HashMap<String, Vec<Notebook>>> = response.json().await?;
         if res.code != 0 {
             return Err(anyhow!("Error listing notebooks"));
@@ -108,11 +124,7 @@ impl Api {
         let client = reqwest::Client::new();
         let url = format!("{}/api/filetree/getPathByID", self.base_url);
         let payload = json!({"id": idx});
-        let response = client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await?;
+        let response = client.post(&url).json(&payload).send().await?;
         let res: ResponseData<String> = response.json().await?;
         if res.code != 0 {
             Err(anyhow!("Error getting filepath by ID"))
@@ -126,11 +138,7 @@ impl Api {
         let client = reqwest::Client::new();
         let url = format!("{}/api/block/updateBlock", self.base_url);
         let payload = json!({"data": data, "dataType": "markdown", "id": idx});
-        let response = client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await?;
+        let response = client.post(&url).json(&payload).send().await?;
         let res: ResponseData<Value> = response.json().await?;
         if res.code != 0 {
             Err(anyhow!("Error updating block: {}, msg: {}", idx, res.msg))
@@ -144,11 +152,7 @@ impl Api {
         let client = reqwest::Client::new();
         let url = format!("{}/api/block/getBlockKramdown", self.base_url);
         let payload = json!({"id": idx});
-        let response = client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await?;
+        let response = client.post(&url).json(&payload).send().await?;
         let res: ResponseData<Value> = response
             .json()
             .await
@@ -156,7 +160,6 @@ impl Api {
         if res.code != 0 {
             Err(anyhow!("Error getting block Kramdown"))
         } else {
-            // TODO: debug
             let raw_data = res.data.to_string();
             let kramdown_data = res.data["kramdown"].as_str().unwrap_or("").to_string();
             if kramdown_data == "" {
@@ -180,11 +183,7 @@ impl Api {
         let previous_id = previous_id.unwrap_or("");
         let parent_id = parent_id.unwrap_or("");
         let payload = json!({"data": data, "nextID": next_id, "previousID": previous_id, "parentID": parent_id, "dataType": "markdown"});
-        let response = client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await?;
+        let response = client.post(&url).json(&payload).send().await?;
         let res: ResponseData<Value> = response.json().await?;
         if res.code != 0 {
             Err(anyhow!("Error inserting block: {}", res.msg))
@@ -199,11 +198,7 @@ impl Api {
         let client = reqwest::Client::new();
         let url = format!("{}/api/deleteBlock", self.base_url);
         let payload = json!({"id": idx});
-        let response = client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await?;
+        let response = client.post(&url).json(&payload).send().await?;
         let res: ResponseData<()> = response.json().await?;
         if res.code != 0 {
             Err(anyhow!("Error deleting block"))

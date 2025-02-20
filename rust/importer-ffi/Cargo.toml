@@ -3,4 +3,15 @@ name = "importer-ffi"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+crate-type = ["staticlib", "lib"]
+name = "importer_ffi"
+
 [dependencies]
+anyhow.workspace = true
+importer-backend = {path = "../importer-backend"}
+thiserror.workspace = true
+uniffi.workspace = true
+
+[build-dependencies]
+uniffi = { version = "0.29", features = ["build"] }
